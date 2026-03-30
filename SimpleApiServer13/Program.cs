@@ -16,7 +16,6 @@ namespace SimpleApiServer14
 {
     internal class Program
     {
-        // ==================== JWT КОНФИГУРАЦИЯ ====================
         private const string JwtIssuer = "SimpleApiServer";
         private const string JwtAudience = "SimpleApiClient";
         private const int JwtLifetimeMinutes = 60;
@@ -30,7 +29,6 @@ namespace SimpleApiServer14
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
-        // ==================== ХРАНИЛИЩА ДАННЫХ ====================
         static List<TaskItem> _tasks = new List<TaskItem>
         {
             new TaskItem { Id = 1, Title = "Сделать лабораторную", Description = "Выполнить ЛР 11 по расширению API", IsCompleted = false, Priority = 2, CreatedAt = DateTime.UtcNow.AddDays(-2), DueDate = DateTime.UtcNow.AddDays(1) },
@@ -86,7 +84,6 @@ namespace SimpleApiServer14
             }
         }
 
-        // ==================== ЦЕНТРАЛИЗОВАННАЯ ОБРАБОТКА ЗАПРОСОВ ====================
         static void HandleRequest(HttpListenerContext context)
         {
             var request = context.Request;
@@ -98,7 +95,6 @@ namespace SimpleApiServer14
 
             try
             {
-                // === AUTH ENDPOINTS (публичные) ===
                 if (path.StartsWith("/api/auth/"))
                 {
                     if (path == "/api/auth/register" && method == "POST")
@@ -110,7 +106,6 @@ namespace SimpleApiServer14
                     return;
                 }
 
-                // === ЗАЩИЩЁННЫЕ ENDPOINTS ===
                 if (path == "/api/tasks" || path == "/api/tasks/" || path.StartsWith("/api/tasks/"))
                 {
                     if (!CheckAuthorization(request, response, out ClaimsPrincipal user))
@@ -148,7 +143,7 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка обработки запроса: {ex}");
+                Console.WriteLine($" Ошибка обработки запроса: {ex}");
                 Console.WriteLine($"   Stack trace: {ex.StackTrace}");
 
                 var errorResponse = new
@@ -160,7 +155,6 @@ namespace SimpleApiServer14
             }
         }
 
-        // ==================== AUTH: РЕГИСТРАЦИЯ ====================
         static void HandleRegister(HttpListenerRequest request, HttpListenerResponse response)
         {
             try
@@ -227,17 +221,16 @@ namespace SimpleApiServer14
                     };
 
                     WriteJson(response, responseData, 201);
-                    Console.WriteLine($"✅ Зарегистрирован пользователь: {newUser.Email}");
+                    Console.WriteLine($" Зарегистрирован пользователь: {newUser.Email}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleRegister: {ex}");
+                Console.WriteLine($" Ошибка в HandleRegister: {ex}");
                 throw;
             }
         }
 
-        // ==================== AUTH: ВХОД ====================
         static void HandleLogin(HttpListenerRequest request, HttpListenerResponse response)
         {
             try
@@ -290,17 +283,16 @@ namespace SimpleApiServer14
                     };
 
                     WriteJson(response, responseData, 200);
-                    Console.WriteLine($"✅ Вход выполнен: {user.Email}");
+                    Console.WriteLine($" Вход выполнен: {user.Email}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleLogin: {ex}");
+                Console.WriteLine($" Ошибка в HandleLogin: {ex}");
                 throw;
             }
         }
 
-        // ==================== ПРОВЕРКА АВТОРИЗАЦИИ ====================
         static bool CheckAuthorization(HttpListenerRequest request, HttpListenerResponse response, out ClaimsPrincipal user)
         {
             user = null;
@@ -349,7 +341,6 @@ namespace SimpleApiServer14
             }
         }
 
-        // ==================== JWT ГЕНЕРАЦИЯ И УТИЛИТЫ ====================
         static string GenerateJwtToken(int userId, string email)
         {
             var claims = new[]
@@ -387,8 +378,6 @@ namespace SimpleApiServer14
         {
             return HashPassword(password) == storedHash;
         }
-
-        // ==================== ЗАЩИЩЁННЫЕ МЕТОДЫ ЗАДАЧ ====================
 
         static void HandleGetTasks(HttpListenerRequest request, HttpListenerResponse response)
         {
@@ -449,7 +438,7 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleGetTasks: {ex}");
+                Console.WriteLine($" Ошибка в HandleGetTasks: {ex}");
                 throw;
             }
         }
@@ -468,7 +457,7 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleGetTaskById: {ex}");
+                Console.WriteLine($" Ошибка в HandleGetTaskById: {ex}");
                 throw;
             }
         }
@@ -533,7 +522,7 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleCreateTask: {ex}");
+                Console.WriteLine($" Ошибка в HandleCreateTask: {ex}");
                 throw;
             }
         }
@@ -595,12 +584,12 @@ namespace SimpleApiServer14
                     if (requestData.IsCompleted.HasValue) task.IsCompleted = requestData.IsCompleted.Value;
 
                     WriteJson(response, new { data = task, error = (object)null }, 200);
-                    Console.WriteLine($"✅ Обновлена задача #{id} пользователем {userId}");
+                    Console.WriteLine($" Обновлена задача #{id} пользователем {userId}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleUpdateTask: {ex}");
+                Console.WriteLine($" Ошибка в HandleUpdateTask: {ex}");
                 throw;
             }
         }
@@ -618,18 +607,15 @@ namespace SimpleApiServer14
 
                 _tasks.Remove(task);
                 WriteJson(response, new { message = "Task deleted successfully", id = id }, 200);
-                Console.WriteLine($"✅ Удалена задача #{id} пользователем {userId}");
+                Console.WriteLine($" Удалена задача #{id} пользователем {userId}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Ошибка в HandleDeleteTask: {ex}");
+                Console.WriteLine($" Ошибка в HandleDeleteTask: {ex}");
                 throw;
             }
         }
 
-        // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
-
-        // 🔹 ПЕРЕГРУЗКА 1: Принимает объект и сериализует его
         static void WriteJson(HttpListenerResponse response, object data, int statusCode = 200)
         {
             response.StatusCode = statusCode;
@@ -642,7 +628,6 @@ namespace SimpleApiServer14
             response.Close();
         }
 
-        // 🔹 ПЕРЕГРУЗКА 2: Принимает уже готовую JSON-строку
         static void WriteJson(HttpListenerResponse response, string json, int statusCode = 200)
         {
             response.StatusCode = statusCode;
@@ -675,8 +660,6 @@ namespace SimpleApiServer14
             return dict.TryGetValue(key, out string val) ? val : defaultValue;
         }
     }
-
-    // ==================== МОДЕЛИ ====================
 
     public class User
     {
