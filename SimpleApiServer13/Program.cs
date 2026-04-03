@@ -12,15 +12,15 @@ using System.Threading.Tasks;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.IdentityModel.Tokens;
 
-namespace SimpleApiServer14
+namespace SimpleApiServer15
 {
     internal class Program
     {
-        private const string JwtIssuer = "SimpleApiServer";
-        private const string JwtAudience = "SimpleApiClient";
-        private const int JwtLifetimeMinutes = 60;
-        private static readonly string JwtSecret = "MySuperSecretKeyForJwtAuthentication2025!";
-        private static readonly SymmetricSecurityKey JwtSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtSecret));
+        static AppConfig _config = new AppConfig();
+        static SymmetricSecurityKey _jwtSigningKey;
+
+        static string _logLevel = "Information";
+        static string _logFilePath = "logs/app.log";
 
         static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
@@ -41,6 +41,11 @@ namespace SimpleApiServer14
         {
             Console.OutputEncoding = Encoding.UTF8;
 
+            _config = LoadConfig();
+            ConfigureLogging(_config.LogLevel, _config.LogFilePath);
+
+            _jwtSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config.JwtSettings.Secret));
+
             _users.Add(new User
             {
                 Id = 1,
@@ -50,12 +55,18 @@ namespace SimpleApiServer14
             });
 
             HttpListener listener = new HttpListener();
-            listener.Prefixes.Add("http://localhost:5000/");
+            foreach (var url in _config.ListenUrls)
+            {
+                listener.Prefixes.Add(url);
+            }
 
             try
             {
                 listener.Start();
-                Console.WriteLine("Сервер запущен: http://localhost:5000/");
+                LogInfo($"Сервер запущен: {string.Join(", ", _config.ListenUrls)}");
+                LogInfo($"Уровень логирования: {_logLevel}");
+                LogInfo($"Путь к логам: {_logFilePath}");
+
                 Console.WriteLine("\n=== Endpoints ===");
                 Console.WriteLine("AUTH (публичные):");
                 Console.WriteLine("  POST /api/auth/register - регистрация");
@@ -74,14 +85,87 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Ошибка сервера: {ex.Message}");
+                LogError($"Ошибка сервера: {ex.Message}", ex);
             }
             finally
             {
                 listener.Stop();
                 listener.Close();
-                Console.WriteLine("Сервер остановлен.");
+                LogInfo("Сервер остановлен.");
             }
+        }
+
+        static AppConfig LoadConfig()
+        {
+            var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+            if (!File.Exists(configPath))
+            {
+                Console.WriteLine($" Файл конфигурации не найден: {configPath}");
+                return new AppConfig();
+            }
+
+            var json = File.ReadAllText(configPath);
+            var config = JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions);
+
+            var port = Environment.GetEnvironmentVariable("API_PORT");
+            if (!string.IsNullOrEmpty(port))
+            {
+                config.ListenUrls = new[] { $"http://localhost:{port}/" };
+                LogInfo($"Порт переопределён из переменной окружения: {port}");
+            }
+
+            var logLevel = Environment.GetEnvironmentVariable("LOG_LEVEL");
+            if (!string.IsNullOrEmpty(logLevel))
+            {
+                config.LogLevel = logLevel;
+            }
+
+            return config!;
+        }
+
+        static void ConfigureLogging(string logLevel, string logFilePath)
+        {
+            _logLevel = logLevel;
+            _logFilePath = logFilePath;
+
+            var logDir = Path.GetDirectoryName(_logFilePath);
+            if (!string.IsNullOrEmpty(logDir) && !Directory.Exists(logDir))
+            {
+                Directory.CreateDirectory(logDir);
+            }
+        }
+
+        static void LogInfo(string message) => WriteLog("INFO", message);
+        static void LogWarning(string message) => WriteLog("WARNING", message);
+        static void LogError(string message, Exception? ex = null)
+        {
+            var logMessage = ex != null ? $"{message}: {ex.Message}" : message;
+            WriteLog("ERROR", logMessage);
+        }
+        static void LogDebug(string message)
+        {
+            if (_logLevel == "Debug") WriteLog("DEBUG", message);
+        }
+
+        static void WriteLog(string level, string message)
+        {
+            var timestamp = DateTime.UtcNow.ToString("O");
+            var logLine = $"{timestamp} [{level}] {message}";
+
+            Console.WriteLine(logLine);
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await File.AppendAllTextAsync(_logFilePath, logLine + Environment.NewLine);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($" Ошибка записи в лог-файл: {ex.Message}");
+                }
+            });
         }
 
         static void HandleRequest(HttpListenerContext context)
@@ -91,6 +175,7 @@ namespace SimpleApiServer14
             string path = request.Url.AbsolutePath;
             string method = request.HttpMethod;
 
+            LogDebug($"{method} {request.Url.PathAndQuery}");
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {method} {request.Url.PathAndQuery}");
 
             try
@@ -143,8 +228,7 @@ namespace SimpleApiServer14
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка обработки запроса: {ex}");
-                Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+                LogError($"Ошибка обработки запроса: {method} {path}", ex);
 
                 var errorResponse = new
                 {
@@ -217,16 +301,16 @@ namespace SimpleApiServer14
                         message = "Регистрация успешна",
                         user = new { id = newUser.Id, email = newUser.Email, name = newUser.Name },
                         token = token,
-                        expiresAt = DateTime.UtcNow.AddMinutes(JwtLifetimeMinutes)
+                        expiresAt = DateTime.UtcNow.AddMinutes(_config.JwtSettings.LifetimeMinutes)
                     };
 
                     WriteJson(response, responseData, 201);
-                    Console.WriteLine($" Зарегистрирован пользователь: {newUser.Email}");
+                    LogInfo($"Зарегистрирован пользователь: {newUser.Email}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleRegister: {ex}");
+                LogError($"Ошибка в HandleRegister", ex);
                 throw;
             }
         }
@@ -272,7 +356,7 @@ namespace SimpleApiServer14
                     }
 
                     var token = GenerateJwtToken(user.Id, user.Email);
-                    var expiresAt = DateTime.UtcNow.AddMinutes(JwtLifetimeMinutes);
+                    var expiresAt = DateTime.UtcNow.AddMinutes(_config.JwtSettings.LifetimeMinutes);
 
                     var responseData = new
                     {
@@ -283,12 +367,12 @@ namespace SimpleApiServer14
                     };
 
                     WriteJson(response, responseData, 200);
-                    Console.WriteLine($" Вход выполнен: {user.Email}");
+                    LogInfo($"Вход выполнен: {user.Email}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleLogin: {ex}");
+                LogError($"Ошибка в HandleLogin", ex);
                 throw;
             }
         }
@@ -315,13 +399,14 @@ namespace SimpleApiServer14
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    ValidIssuer = JwtIssuer,
-                    ValidAudience = JwtAudience,
-                    IssuerSigningKey = JwtSigningKey,
+                    ValidIssuer = _config.JwtSettings.Issuer,
+                    ValidAudience = _config.JwtSettings.Audience,
+                    IssuerSigningKey = _jwtSigningKey,
                     ClockSkew = TimeSpan.Zero
                 };
 
                 user = tokenHandler.ValidateToken(token, validationParams, out _);
+                LogDebug($"Токен валидирован для пользователя: {user.FindFirst(ClaimTypes.Email)?.Value}");
                 return true;
             }
             catch (SecurityTokenExpiredException)
@@ -351,13 +436,13 @@ namespace SimpleApiServer14
                 new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
             };
 
-            var credentials = new SigningCredentials(JwtSigningKey, SecurityAlgorithms.HmacSha256);
+            var credentials = new SigningCredentials(_jwtSigningKey, SecurityAlgorithms.HmacSha256);
 
             var token = new JwtSecurityToken(
-                issuer: JwtIssuer,
-                audience: JwtAudience,
+                issuer: _config.JwtSettings.Issuer,
+                audience: _config.JwtSettings.Audience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(JwtLifetimeMinutes),
+                expires: DateTime.UtcNow.AddMinutes(_config.JwtSettings.LifetimeMinutes),
                 signingCredentials: credentials
             );
 
@@ -435,10 +520,11 @@ namespace SimpleApiServer14
                 };
 
                 WriteJson(response, responseData, 200);
+                LogDebug($"GET /api/tasks: возвращено {result.Count} задач");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleGetTasks: {ex}");
+                LogError($"Ошибка в HandleGetTasks", ex);
                 throw;
             }
         }
@@ -454,10 +540,11 @@ namespace SimpleApiServer14
                     return;
                 }
                 WriteJson(response, new { data = task, error = (object)null }, 200);
+                LogDebug($"GET /api/tasks/{id}: задача найдена");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleGetTaskById: {ex}");
+                LogError($"Ошибка в HandleGetTaskById", ex);
                 throw;
             }
         }
@@ -517,12 +604,12 @@ namespace SimpleApiServer14
                     _tasks.Add(newTask);
                     response.Headers.Add("Location", $"http://localhost:5000/api/tasks/{newTask.Id}");
                     WriteJson(response, new { data = newTask, error = (object)null }, 201);
-                    Console.WriteLine($"✅ Создана задача #{newTask.Id} пользователем {userId}");
+                    LogInfo($"Создана задача #{newTask.Id} пользователем {userId}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleCreateTask: {ex}");
+                LogError($"Ошибка в HandleCreateTask", ex);
                 throw;
             }
         }
@@ -584,12 +671,12 @@ namespace SimpleApiServer14
                     if (requestData.IsCompleted.HasValue) task.IsCompleted = requestData.IsCompleted.Value;
 
                     WriteJson(response, new { data = task, error = (object)null }, 200);
-                    Console.WriteLine($" Обновлена задача #{id} пользователем {userId}");
+                    LogInfo($"Обновлена задача #{id} пользователем {userId}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleUpdateTask: {ex}");
+                LogError($"Ошибка в HandleUpdateTask", ex);
                 throw;
             }
         }
@@ -607,11 +694,11 @@ namespace SimpleApiServer14
 
                 _tasks.Remove(task);
                 WriteJson(response, new { message = "Task deleted successfully", id = id }, 200);
-                Console.WriteLine($" Удалена задача #{id} пользователем {userId}");
+                LogInfo($"Удалена задача #{id} пользователем {userId}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($" Ошибка в HandleDeleteTask: {ex}");
+                LogError($"Ошибка в HandleDeleteTask", ex);
                 throw;
             }
         }
@@ -659,6 +746,22 @@ namespace SimpleApiServer14
         {
             return dict.TryGetValue(key, out string val) ? val : defaultValue;
         }
+    }
+
+    public class AppConfig
+    {
+        public string[] ListenUrls { get; set; } = new[] { "http://localhost:5000/" };
+        public string LogLevel { get; set; } = "Information";
+        public string LogFilePath { get; set; } = "logs/app.log";
+        public JwtSettings JwtSettings { get; set; } = new JwtSettings();
+    }
+
+    public class JwtSettings
+    {
+        public string Secret { get; set; } = "DefaultSecretKey!";
+        public string Issuer { get; set; } = "SimpleApiServer";
+        public string Audience { get; set; } = "SimpleApiClient";
+        public int LifetimeMinutes { get; set; } = 60;
     }
 
     public class User
